@@ -38,4 +38,9 @@
       <Filter>Dependencies</Filter>
     </Library>
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="report_descriptor.txt">
+      <Filter>Resource Files</Filter>
+    </Text>
+  </ItemGroup>
 </Project>

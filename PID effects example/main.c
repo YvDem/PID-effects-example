@@ -52,18 +52,6 @@
 
 #define MAX_STR 255
 
-enum REPORT_ID {
-    PID_POOL_REPORT_ID = 0x13,
-    PID_DEVICE_CONTROL_REPORT_ID = 0x0c,
-    DEVICE_GAIN_REPORT_ID = 0x0d,
-    CREATE_NEW_EFFECT_REPORT_ID = 0x11,
-    PID_BLOCK_LOAD_REPORT_ID = 0x12,
-    SET_CONSTANT_FORCE_REPORT_ID = 0x05,
-    SET_ENVELOPE_REPORT_ID = 0x02,
-    SET_EFFECT_REPORT_ID = 0x01,
-    EFFECT_OPERATION_REPORT_ID = 0x0a,
-} REPORT_ID;
-
 const char* hid_bus_name(hid_bus_type bus_type) {
     static const char* const HidBusTypeName[] = {
             "Unknown",
@@ -138,56 +126,22 @@ void print_devices_with_descriptor(struct hid_device_info* cur_dev) {
     }
 }
 
-void read_once(hid_device* handle, unsigned char* buf, int len) {
-    int res = 0;
-    int i = 0;
-    while (res == 0) {
-        res = hid_read(handle, buf, sizeof(buf));
-        if (res == 0) {
-            printf("waiting...\n");
-        }
-        if (res < 0) {
-            printf("Unable to read(): %ls\n", hid_error(handle));
-            break;
-        }
-
-        i++;
-        if (i >= 10) { /* 10 tries by 500 ms - 5 seconds of waiting*/
-            printf("read() timeout\n");
-            break;
-        }
-
-#ifdef _WIN32
-        Sleep(500);
-#else
-        usleep(500 * 1000);
-#endif
-    }
-
-    if (res > 0) {
-        printf("Data read:\n   ");
-        // Print out the returned buffer.
-        for (i = 0; i < res; i++)
-            printf("%02x ", (unsigned int)buf[i]);
-        printf("\n");
-    }
-}
-
 int main(int argc, char* argv[])
 {
     (void)argc;
     (void)argv;
 
-    int res;
-    unsigned char buf[256];
-    unsigned char index;
-    wchar_t wstr[MAX_STR];
-    hid_device* handle;
-    int i;
+    
+    int res; // Result code 
+    unsigned char buf[256]; // Buffer for write / read operations
+    unsigned char index;  // Index of the effect
+    wchar_t wstr[MAX_STR]; // String buffer
+    hid_device* handle; // Handle to the device
+    int i; // Counter
 
     struct hid_device_info* devs;
 
-    printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
+    printf("pid effcts example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
     if (HID_API_VERSION == HID_API_MAKE_VERSION(hid_version()->major, hid_version()->minor, hid_version()->patch)) {
         printf("Compile-time version matches runtime version of hidapi.\n\n");
     }
@@ -198,6 +152,24 @@ int main(int argc, char* argv[])
     if (hid_init())
         return -1;
 
+#if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+    // To work properly needs to be called before hid_open/hid_open_path after hid_init.
+    // Best/recommended option - call it right after hid_init.
+    hid_darwin_set_open_exclusive(0);
+#endif
+
+    // Get the vendor id and product id of the PID device
+    // you are using with the following command:
+    // Here I am using 0x346e and 0x0002 
+    // That correspond to a MOZA R9 Base
+
+    /*
+    devs = hid_enumerate(0x0, 0x0);
+    print_devices_with_descriptor(devs);
+    hid_free_enumeration(devs);
+    */
+
+    // Once you have the vendor id and product id, you can open the device
     handle = hid_open(0x346e, 0x0002, NULL);
     if (!handle) {
         printf("unable to open device\n");
@@ -205,118 +177,160 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // Copying the MOZA API calls hierarchy
-    // 1. PID_POOL_REPORT
-    // 2. PID_DEVICE_CONTROL_REPORT
-    // 3. DEVICE_GAIN_REPORT
-    // 4. CREATE_NEW_EFFECT_REPORT
-    // 5. PID_BLOCK_LOAD_REPORT
-    // 6. SET_CONSTANT_FORCE_REPORT
-    // 7. SET_ENVELOPE_REPORT
-    // 8. SET_EFFECT_REPORT
-    // 9. EFFECT_OPERATION_REPORT
-    // 6. SET_CONSTANT_FORCE_REPORT
+    // First, you need the report descritor of the device
+    // Then, you need to parse it to get something useful
+    // You can find the report descriptor of this device in the file report_descriptor.txt
+    // I used https://eleccelerator.com/usbdescreqparser/ to parse it.
+    // Note that the link provided does not parse the Usages of the PID usage page. Here I did it manually
+    // Using the Device Class Definition for Physical Interface Devices (PID) provided on usb.org
+    /*
+    
+    print_hid_report_descriptor_from_device(handle);
+
+    hid_close(handle);
+    hid_exit();
+
+    system("pause");
+
+    return 0;
+    */
 
 
-    // 1. PID_POOL_REPORT
-    // Endpoint: GET_REPORT
-    memset(buf, 0x00, sizeof(buf));
-    buf[0] = PID_POOL_REPORT_ID;
+    // From the report descriptor, we can get the different report IDs
+    // and parameters needed to send the different reports to the device
+    // Here is a list of the report IDs and the corresponding reports
+    // Note that the report IDs are not the sames depending on the device
+    // And also note that the parameters are not the sames depending on the device
+    enum REPORT_ID {
+        PID_POOL_REPORT_ID = 0x13,
+        PID_DEVICE_CONTROL_REPORT_ID = 0x0c,
+        DEVICE_GAIN_REPORT_ID = 0x0d,
+        CREATE_NEW_EFFECT_REPORT_ID = 0x11,
+        PID_BLOCK_LOAD_REPORT_ID = 0x12,
+        SET_CONSTANT_FORCE_REPORT_ID = 0x05,
+        SET_ENVELOPE_REPORT_ID = 0x02,
+        SET_EFFECT_REPORT_ID = 0x01,
+        EFFECT_OPERATION_REPORT_ID = 0x0a,
+    } REPORT_ID;
 
-    res = hid_get_feature_report(handle, buf, 19);
-    if (res < 0) {
-        printf("Unable to get a feature report: %ls\n", hid_error(handle));
-    }
-    else {
-        // Print out the returned buffer.
-        printf("Feature Report\n   ");
-        for (i = 0; i < res; i++)
-            printf("%02x ", (unsigned int)buf[i]);
-        printf("\n");
-    }
+    // Here is the different reports that we need to send to the device
+    // to initialize the effect and start it
+    // It is based on example provided on 
+    // the Device Class Definition for Physical Interface Devices (PID)
 
-    // 2. PID_DEVICE_CONTROL_REPORT
+    // 1. PID_DEVICE_CONTROL_REPORT
+    // 2. DEVICE_GAIN_REPORT
+    // 3. CREATE_NEW_EFFECT_REPORT
+    // 4. PID_BLOCK_LOAD_REPORT
+    // 5. SET_CONSTANT_FORCE_REPORT
+    // 6. SET_ENVELOPE_REPORT
+    // 7. SET_EFFECT_REPORT
+    // 8. EFFECT_OPERATION_REPORT
+
+    // 1. PID_DEVICE_CONTROL_REPORT
     // Endpoint: INTERRUPT_OUT
     // Data: 0b00001000 
+    // I am setting the reset bit to 1, which does:
+    //      Clears any device paused condition, enables all actuators 
+    //      and clears all effects from memory.
     memset(buf, 0x00, sizeof(buf));
     buf[0] = PID_DEVICE_CONTROL_REPORT_ID;
     buf[1] = 0b00001000; // Device Control
-
-    res = hid_write(handle, buf, 3);
+        
+    res = hid_write(handle, buf, 3);              
     if (res < 0) {
-        printf("Unable to write(): %ls\n", hid_error(handle));
+        printf("Unable to send PID_DEVICE_CONTROL_REPORT: %ls\n", hid_error(handle));
     }
     else {
-        printf("Data written 1\n");
+        printf("Sent PID_DEVICE_CONTROL_REPORT\n");
     }
 
-    // 3. DEVICE_GAIN_REPORT
+    // 2. DEVICE_GAIN_REPORT
     // Endpoint: INTERRUPT_OUT
     // Data: 0xff
+    // I am setting the device gain to 0xff (255)
+    // To get 100% of the force applied
     memset(buf, 0x00, sizeof(buf));
     buf[0] = DEVICE_GAIN_REPORT_ID;
     buf[1] = 0xff; // Device Gain
 
     res = hid_write(handle, buf, 3);
     if (res < 0) {
-        printf("Unable to write(): %ls\n", hid_error(handle));
+        printf("Unableto send DEVICE_GAIN_REPORT: %ls\n", hid_error(handle));
     }
     else {
-        printf("Data written 2\n");
+        printf("Sent DEVICE_GAIN_REPORT\n");
     }
 
-    // 4. CREATE_NEW_EFFECT_REPORT
+    // 3. CREATE_NEW_EFFECT_REPORT
     // Endpoint: SET_REPORT
     // Data: 0x01
+    // I am telling the device that I want to create a ET Constant Force Effect
+    // The device will try and make space for the effect in memory.
     memset(buf, 0x00, sizeof(buf));
     buf[0] = CREATE_NEW_EFFECT_REPORT_ID;
-    buf[1] = 0x01; // Create New Effect
+    buf[1] = 0x01; // Create New ET Constant Force Effect
 
     res = hid_send_feature_report(handle, buf, 4);
     if (res < 0) {
-        printf("Unable to send a feature report: %ls\n", hid_error(handle));
+        printf("Unable to send CREATE_NEW_EFFECT_REPORT: %ls\n", hid_error(handle));
     }
     else {
-        printf("Feature Report sent\n");
+        printf("sent CREATE_NEW_EFFECT_REPORT\n");
     }
 
-    // 5. PID_BLOCK_LOAD_REPORT
+    // 4. PID_BLOCK_LOAD_REPORT
     // Endpoint: GET_REPORT
+    // Here I am sending a GET_REPORT to the device to get the index of the effect
+    // that has been created in the device memory
+    // The device will return the index of the effect, as well as if it was successful
+    // and the remaining memory in the device
     memset(buf, 0x00, sizeof(buf));
     buf[0] = PID_BLOCK_LOAD_REPORT_ID;
 
+    // Note that the lenght of the buffer must be enough to receive the data
     res = hid_get_feature_report(handle, buf, 19);
     if (res < 0) {
-        printf("Unable to get a feature report: %ls\n", hid_error(handle));
+        printf("Unable to get PID_BLOCK_LOAD_REPORT: %ls\n", hid_error(handle));
     }
     else {
         // Print out the returned buffer.
-        printf("Feature Report\n   ");
+        printf("PID_BLOCK_LOAD_REPORT\n   ");
         for (i = 0; i < res; i++)
             printf("%02x ", (unsigned int)buf[i]);
         printf("\n");
     }
 
+    // The index of the effect is in the second byte of the buffer
+    // The index is 0 if the effect could not be allocated
     index = buf[1];
+    if (index == 0) {
+		printf("Effect could not be allocated\n");
+		return 1;
+	}
 
-    // 6. SET_CONSTANT_FORCE_REPORT
+    // 5. SET_CONSTANT_FORCE_REPORT
     // Endpoint: INTERRUPT_OUT
     // Data: index (8), magnitude (16)
+    // Before starting the effect, we need to set the magnitude of the effect
+    // As well as the envelope of the effect
+    // Thoses parameters change depending on the effect type, make sure
+    // to set the ones that are needed for the effect you are using
     memset(buf, 0x00, sizeof(buf));
     buf[0] = SET_CONSTANT_FORCE_REPORT_ID;
     buf[1] = index;
-    buf[2] = 0xcd; // Magnitude
-    buf[3] = 0x0c; // Magnitude
+    buf[2] = 0x00; // Magnitude
+    buf[3] = 0x00; // Magnitude
 
     res = hid_write(handle, buf, 5);
     if (res < 0) {
-        printf("Unable to write(): %ls\n", hid_error(handle));
+        printf("Unable to send SET_CONSTANT_FORCE_REPORT: %ls\n", hid_error(handle));
     }
     else {
-        printf("Data written 3\n");
+        printf("Sent SET_CONSTANT_FORCE_REPORT\n");
     }
 
-    // 7. SET_ENVELOPE_REPORT
+    // 6. SET_ENVELOPE_REPORT
     // Endpoint: INTERRUPT_OUT
     // Data: index (8), attack level (16), fade level (16), attack time (32), fade time (32)
     memset(buf, 0x00, sizeof(buf));
@@ -337,13 +351,13 @@ int main(int argc, char* argv[])
 
     res = hid_write(handle, buf, 15);
     if (res < 0) {
-        printf("Unable to write(): %ls\n", hid_error(handle));
+        printf("Unable to send SET_ENVELOPE_REPORT: %ls\n", hid_error(handle));
     }
     else {
-        printf("Data written 4\n");
+        printf("Sent SET_ENVELOPE_REPORT\n");
     }
 
-    // 8. SET_EFFECT_REPORT
+    // 7. SET_EFFECT_REPORT
     // Endpoint: INTERRUPT_OUT
     // Data: 
     //      index (8), 
@@ -362,17 +376,19 @@ int main(int argc, char* argv[])
     //      direction Y (16),
     //	    type specific block offset 1 (16),
     //      type specific block offset 2 (16),
+    // 
+    // Once the magnitude and envelope of the effect are set, we can start the effect
     memset(buf, 0x00, sizeof(buf));
-    buf[0] = SET_EFFECT_REPORT_ID;
-    buf[1] = index;
-    buf[2] = 0x01; // Effect Type
-    buf[3] = 0xff; // Duration 1
-    buf[4] = 0xff; // Duration 2
-    buf[5] = 0x00; // Trigger Repeat Interval 1
-    buf[6] = 0x00; // Trigger Repeat Interval 2
-    buf[7] = 0x00; // Sample Period 1
-    buf[8] = 0x00; // Sample Period 2
-    buf[9] = 0x00; // Start Delay 1
+    buf[0]  = SET_EFFECT_REPORT_ID;
+    buf[1]  = index; // Index given by the device
+    buf[2]  = 0x01; // Effect Type
+    buf[3]  = 0xff; // Duration 1 
+    buf[4]  = 0xff; // Duration 2
+    buf[5]  = 0x00; // Trigger Repeat Interval 1
+    buf[6]  = 0x00; // Trigger Repeat Interval 2
+    buf[7]  = 0x00; // Sample Period 1
+    buf[8]  = 0x00; // Sample Period 2
+    buf[9]  = 0x00; // Start Delay 1
     buf[10] = 0x00; // Start Delay 2
     buf[11] = 0xff; // Gain
     buf[12] = 0xff; // Trigger Button
@@ -388,13 +404,13 @@ int main(int argc, char* argv[])
 
     res = hid_write(handle, buf, 23);
     if (res < 0) {
-        printf("Unable to write(): %ls\n", hid_error(handle));
+        printf("Unable to send SET_EFFECT_REPORT: %ls\n", hid_error(handle));
     }
     else {
-        printf("Data written 5\n");
+        printf("Sent SET_EFFECT_REPORT\n");
     }
 
-    // 9. EFFECT_OPERATION_REPORT
+    // 8. EFFECT_OPERATION_REPORT
     // Endpoint: INTERRUPT_OUT
     // Data: 
     //      index (8),
@@ -403,6 +419,7 @@ int main(int argc, char* argv[])
     //      Op effect stop (1),
     //      Padding (5),
     //      Loop Count (8),
+    // Now that everything is set, we can start the effect
     memset(buf, 0x00, sizeof(buf));
     buf[0] = EFFECT_OPERATION_REPORT_ID;
     buf[1] = index;
@@ -410,12 +427,14 @@ int main(int argc, char* argv[])
 
     res = hid_write(handle, buf, 4);
     if (res < 0) {
-        printf("Unable to write(): %ls\n", hid_error(handle));
+        printf("Unable to send EFFECT_OPERATION_REPORT: %ls\n", hid_error(handle));
     }
     else {
-        printf("Data written 6\n");
+        printf("Sent EFFECT_OPERATION_REPORT\n");
     }
 
+    // Here I am setting the magnitude of the effect to 1500
+    // Then to -1500 to make the wheel spin
     for (i = 0; i < 10; i++) {
 
         // SET_CONSTANT_FORCE_REPORT
@@ -448,15 +467,20 @@ int main(int argc, char* argv[])
 
     }
 
+    // PID_DEVICE_CONTROL_REPORT
+    // Endpoint: INTERRUPT_OUT
+    // Data: 0b00000100 
+    // I am clearing all effects before closing the device
     memset(buf, 0x00, sizeof(buf));
-    buf[0] = SET_CONSTANT_FORCE_REPORT_ID;
-    buf[1] = index;
-    buf[2] = 0x00; // Magnitude
-    buf[3] = 0x00; // Magnitude
+    buf[0] = PID_DEVICE_CONTROL_REPORT_ID;
+    buf[1] = 0b00000100; // Device Control
 
-    for (int i = 0; i < 100; i++) {
-        res = hid_write(handle, buf, 5);
-        Sleep(10);
+    res = hid_write(handle, buf, 3);
+    if (res < 0) {
+        printf("Unable to send PID_DEVICE_CONTROL_REPORT: %ls\n", hid_error(handle));
+    }
+    else {
+        printf("PID_DEVICE_CONTROL_REPORT sent\n");
     }
 
     hid_close(handle);
